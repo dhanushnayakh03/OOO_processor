@@ -41,6 +41,9 @@ module fu_load (
     output wire [`XLEN-1:0]       dmem_raddr,
     input  wire [`XLEN-1:0]       dmem_rdata,
 
+    // Readiness to Reservation Station
+    output wire                   fu_load_ready,
+
     // CDB Arbiter Interface (FU/C Output Pipeline Register)
     input  wire                   load_grant,
     output reg                    fu_c_valid,
@@ -75,38 +78,47 @@ module fu_load (
     assign sq_load_addr    = effective_addr;
     assign sq_load_byte_en = load_mask;
 
-    // Data Memory outputs (active if load does not hit in SQ and no hazard)
+    // Data Memory outputs (active when load misses in SQ and has no hazard)
     assign dmem_ren   = is_load_active && !sq_forward_valid && !sq_load_hazard;
     assign dmem_raddr = effective_addr;
 
     // ------------------------------------------------------------------------
-    // Raw Data Selection (SQ Forwarded Data or Memory Data)
+    // Format Function for Byte / Half / Word / Doubleword
     // ------------------------------------------------------------------------
-    wire [`XLEN-1:0] raw_data = sq_forward_valid ? sq_forward_data : dmem_rdata;
-
-    // Extract properly aligned and extended load value
-    reg [`XLEN-1:0] formatted_data;
-    wire [7:0]      raw_byte = raw_data >> (byte_offset * 8);
-    wire [15:0]     raw_half = raw_data >> ({byte_offset[2:1], 1'b0} * 8);
-    wire [31:0]     raw_word = byte_offset[2] ? raw_data[63:32] : raw_data[31:0];
-
-    always @(*) begin
-        case (funct3)
-            `FUNCT3_LB:  formatted_data = {{56{raw_byte[7]}}, raw_byte};
-            `FUNCT3_LBU: formatted_data = {56'd0, raw_byte};
-            `FUNCT3_LH:  formatted_data = {{48{raw_half[15]}}, raw_half};
-            `FUNCT3_LHU: formatted_data = {48'd0, raw_half};
-            `FUNCT3_LW:  formatted_data = {{32{raw_word[31]}}, raw_word};
-            `FUNCT3_LWU: formatted_data = {32'd0, raw_word};
-            `FUNCT3_LD:  formatted_data = raw_data;
-            default:     formatted_data = raw_data;
-        endcase
-    end
+    function [`XLEN-1:0] format_load_val;
+        input [2:0]       f3;
+        input [2:0]       offset;
+        input [`XLEN-1:0] raw;
+        reg [7:0]         b;
+        reg [15:0]        h;
+        reg [31:0]        w;
+        begin
+            b = raw >> (offset * 8);
+            h = raw >> ({offset[2:1], 1'b0} * 8);
+            w = offset[2] ? raw[63:32] : raw[31:0];
+            case (f3)
+                `FUNCT3_LB:  format_load_val = {{56{b[7]}}, b};
+                `FUNCT3_LBU: format_load_val = {56'd0, b};
+                `FUNCT3_LH:  format_load_val = {{48{h[15]}}, h};
+                `FUNCT3_LHU: format_load_val = {48'd0, h};
+                `FUNCT3_LW:  format_load_val = {{32{w[31]}}, w};
+                `FUNCT3_LWU: format_load_val = {32'd0, w};
+                `FUNCT3_LD:  format_load_val = raw;
+                default:     format_load_val = raw;
+            endcase
+        end
+    endfunction
 
     // ------------------------------------------------------------------------
-    // FU/C Output Pipeline Register
+    // Synchronous BRAM Pipeline Register & Arbiter Interface
     // ------------------------------------------------------------------------
-    wire load_success = is_load_active && !sq_load_hazard;
+    reg                   bram_pending;
+    reg [`ROB_WIDTH-1:0]  bram_rob_idx;
+    reg [`PR_WIDTH-1:0]   bram_dest_pr;
+    reg [2:0]             bram_offset;
+    reg [2:0]             bram_funct3;
+
+    assign fu_load_ready = !bram_pending && (!fu_c_valid || load_grant);
 
     always @(posedge clk or posedge rst) begin
         if (rst || recover_en) begin
@@ -114,16 +126,42 @@ module fu_load (
             fu_c_rob_idx <= `ROB_WIDTH'd0;
             fu_c_dest_pr <= `ZERO_PR;
             fu_c_data    <= 64'd0;
+            bram_pending <= 1'b0;
+            bram_rob_idx <= `ROB_WIDTH'd0;
+            bram_dest_pr <= `ZERO_PR;
+            bram_offset  <= 3'd0;
+            bram_funct3  <= 3'd0;
         end else begin
+            // 1. Clear output buffer when granted by CDB
             if (load_grant) begin
                 fu_c_valid <= 1'b0;
             end
 
-            if (load_success) begin
+            // 2. Stage 2: Synchronous BRAM read response arrives
+            if (bram_pending) begin
                 fu_c_valid   <= 1'b1;
-                fu_c_rob_idx <= ex_rob_idx;
-                fu_c_dest_pr <= ex_dest_pr;
-                fu_c_data    <= formatted_data;
+                fu_c_rob_idx <= bram_rob_idx;
+                fu_c_dest_pr <= bram_dest_pr;
+                fu_c_data    <= format_load_val(bram_funct3, bram_offset, dmem_rdata);
+                bram_pending <= 1'b0;
+            end
+
+            // 3. Stage 1: Load issued from Issue Stage
+            if (is_load_active) begin
+                if (sq_forward_valid) begin
+                    // Store Queue forward hit (immediate)
+                    fu_c_valid   <= 1'b1;
+                    fu_c_rob_idx <= ex_rob_idx;
+                    fu_c_dest_pr <= ex_dest_pr;
+                    fu_c_data    <= format_load_val(funct3, byte_offset, sq_forward_data);
+                end else if (!sq_load_hazard) begin
+                    // BRAM read initiated; response arrives next cycle
+                    bram_pending <= 1'b1;
+                    bram_rob_idx <= ex_rob_idx;
+                    bram_dest_pr <= ex_dest_pr;
+                    bram_offset  <= byte_offset;
+                    bram_funct3  <= funct3;
+                end
             end
         end
     end

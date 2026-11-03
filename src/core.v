@@ -23,6 +23,7 @@ module core #(
     input  wire                   rst,
 
     // Instruction Memory Interface (Port A)
+    output wire                   imem_en,
     output wire [`XLEN-1:0]       imem_addr,
     input  wire [`ILEN-1:0]       imem_inst,
 
@@ -95,6 +96,7 @@ module core #(
         .recover_target        (recover_target),
         .pred_taken            (bp_pred_taken),
         .pred_target           (bp_pred_target),
+        .imem_en               (imem_en),
         .imem_addr             (imem_addr),
         .imem_inst             (imem_inst),
         .if_id_valid           (if_id_valid),
@@ -465,7 +467,7 @@ module core #(
         .alu_ready             (!fu_alu_valid    || fu_alu_grant),
         .mult_ready            (!fu_mult_valid   || fu_mult_grant),
         .branch_ready          (!fu_branch_valid || fu_branch_grant),
-        .load_ready            (!fu_load_valid   || fu_load_grant),
+        .load_ready            (fu_load_ready && !sq_dmem_wen),
         .load_tail_ready       (sq_load_tail_ready),
         .issue_valid           (issue_valid),
         .issue_fu              (issue_fu),
@@ -647,6 +649,7 @@ module core #(
 
     // Load FU
     wire                  fu_load_grant;
+    wire                  fu_load_ready;
     wire                  fu_load_valid;
     wire [`ROB_WIDTH-1:0] fu_load_rob_idx;
     wire [`PR_WIDTH-1:0]  fu_load_dest_pr;
@@ -676,6 +679,7 @@ module core #(
         .dmem_ren              (load_dmem_ren),
         .dmem_raddr            (load_dmem_raddr),
         .dmem_rdata            (dmem_rdata),
+        .fu_load_ready         (fu_load_ready),
         .load_grant            (fu_load_grant),
         .fu_c_valid            (fu_load_valid),
         .fu_c_rob_idx          (fu_load_rob_idx),

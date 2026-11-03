@@ -16,6 +16,7 @@ module memory #(
     input  wire                   rst,
 
     // Port A: Instruction Fetch Interface (Read-only)
+    input  wire                   imem_en,
     input  wire [`XLEN-1:0]       imem_addr,
     output wire [`ILEN-1:0]       imem_rdata,
 
@@ -28,42 +29,45 @@ module memory #(
     output reg  [`XLEN-1:0]       dmem_rdata
 );
 
-    // 64-bit wide unified memory array
-    reg [63:0] mem_array [0:MEM_DEPTH-1];
+    // 64-bit wide unified memory array (inferred as hardware Block RAM)
+    (* ram_style = "block" *) reg [63:0] mem_array [0:MEM_DEPTH-1];
 
     // Word and doubleword address decoding
     wire [12:0] i_index = imem_addr[15:3];
     wire [12:0] d_index = dmem_addr[15:3];
 
     // ------------------------------------------------------------------------
-    // Port A: Instruction Fetch (Combinational read for 1-cycle fetch)
+    // Port A: Instruction Fetch (Synchronous 1-cycle BRAM read with Clock Enable)
     // ------------------------------------------------------------------------
-    wire [63:0] i_line = mem_array[i_index];
-    assign imem_rdata = imem_addr[2] ? i_line[63:32] : i_line[31:0];
+    reg [63:0] i_line;
+    reg        i_word_sel;
 
-    // ------------------------------------------------------------------------
-    // Port B: Data Memory
-    // ------------------------------------------------------------------------
-    // Synchronous Byte-Masked Writes
     always @(posedge clk) begin
-        if (dmem_en && dmem_wen) begin
-            if (dmem_byte_en[0]) mem_array[d_index][ 7: 0] <= dmem_wdata[ 7: 0];
-            if (dmem_byte_en[1]) mem_array[d_index][15: 8] <= dmem_wdata[15: 8];
-            if (dmem_byte_en[2]) mem_array[d_index][23:16] <= dmem_wdata[23:16];
-            if (dmem_byte_en[3]) mem_array[d_index][31:24] <= dmem_wdata[31:24];
-            if (dmem_byte_en[4]) mem_array[d_index][39:32] <= dmem_wdata[39:32];
-            if (dmem_byte_en[5]) mem_array[d_index][47:40] <= dmem_wdata[47:40];
-            if (dmem_byte_en[6]) mem_array[d_index][55:48] <= dmem_wdata[55:48];
-            if (dmem_byte_en[7]) mem_array[d_index][63:56] <= dmem_wdata[63:56];
+        if (imem_en) begin
+            i_line     <= mem_array[i_index];
+            i_word_sel <= imem_addr[2];
         end
     end
 
-    // Combinational Read with Write Forwarding
-    always @(*) begin
-        if (dmem_en && !dmem_wen) begin
-            dmem_rdata = mem_array[d_index];
-        end else begin
-            dmem_rdata = 64'd0;
+    assign imem_rdata = i_word_sel ? i_line[63:32] : i_line[31:0];
+
+    // ------------------------------------------------------------------------
+    // Port B: Data Memory (Synchronous Read & Byte-Masked Write)
+    // ------------------------------------------------------------------------
+    always @(posedge clk) begin
+        if (dmem_en) begin
+            if (dmem_wen) begin
+                if (dmem_byte_en[0]) mem_array[d_index][ 7: 0] <= dmem_wdata[ 7: 0];
+                if (dmem_byte_en[1]) mem_array[d_index][15: 8] <= dmem_wdata[15: 8];
+                if (dmem_byte_en[2]) mem_array[d_index][23:16] <= dmem_wdata[23:16];
+                if (dmem_byte_en[3]) mem_array[d_index][31:24] <= dmem_wdata[31:24];
+                if (dmem_byte_en[4]) mem_array[d_index][39:32] <= dmem_wdata[39:32];
+                if (dmem_byte_en[5]) mem_array[d_index][47:40] <= dmem_wdata[47:40];
+                if (dmem_byte_en[6]) mem_array[d_index][55:48] <= dmem_wdata[55:48];
+                if (dmem_byte_en[7]) mem_array[d_index][63:56] <= dmem_wdata[63:56];
+            end else begin
+                dmem_rdata <= mem_array[d_index];
+            end
         end
     end
 

@@ -17,6 +17,7 @@ module tb_single_step;
     always #5 clk = ~clk;
 
     // Memory wires
+    wire             imem_en;
     wire [`XLEN-1:0] imem_addr;
     wire [`ILEN-1:0] imem_inst;
     wire             dmem_en;
@@ -41,6 +42,7 @@ module tb_single_step;
     ) u_mem (
         .clk          (clk),
         .rst          (rst),
+        .imem_en      (imem_en),
         .imem_addr    (imem_addr),
         .imem_rdata   (imem_inst),
         .dmem_en      (dmem_en),
@@ -57,6 +59,7 @@ module tb_single_step;
     ) u_core (
         .clk              (clk),
         .rst              (rst),
+        .imem_en          (imem_en),
         .imem_addr        (imem_addr),
         .imem_inst        (imem_inst),
         .dmem_en          (dmem_en),
