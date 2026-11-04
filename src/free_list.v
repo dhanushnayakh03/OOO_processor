@@ -53,19 +53,14 @@ module free_list (
     // Combinational RRAT check for Recovery (parallel bitmask generation)
     // ------------------------------------------------------------------------
     reg [`NUM_PHYS_REGS-1:0] recovered_free_mask;
-    integer r_idx, a_idx;
-    reg in_rrat;
+    integer a_idx;
 
     always @(*) begin
-        recovered_free_mask[0] = 1'b0; // p0 is hardwired zero, never free
-        for (r_idx = 1; r_idx < `NUM_PHYS_REGS; r_idx = r_idx + 1) begin
-            in_rrat = 1'b0;
-            for (a_idx = 0; a_idx < `NUM_ARCH_REGS; a_idx = a_idx + 1) begin
-                if (rrat_mappings[a_idx * `PR_WIDTH +: `PR_WIDTH] == r_idx[5:0]) begin
-                    in_rrat = 1'b1;
-                end
-            end
-            recovered_free_mask[r_idx] = !in_rrat;
+        // Start with all physical registers free except p0 (hardwired zero)
+        recovered_free_mask = 64'hFFFFFFFFFFFFFFFE;
+        // Mark physical registers currently mapped in RRAT as in-use (not free)
+        for (a_idx = 1; a_idx < `NUM_ARCH_REGS; a_idx = a_idx + 1) begin
+            recovered_free_mask[rrat_mappings[a_idx * `PR_WIDTH +: `PR_WIDTH]] = 1'b0;
         end
     end
 
