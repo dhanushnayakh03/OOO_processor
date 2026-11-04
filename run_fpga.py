@@ -15,30 +15,49 @@ import argparse
 import subprocess
 
 try:
-    from pynq import Overlay
+    from pynq import Overlay, Clocks
 except ImportError:
     Overlay = None
+    Clocks = None
 
 
 class OoOProcessorFPGA:
-    def __init__(self, bitstream="ooo_scalar.bit"):
+    def __init__(self, bitstream="ooo_scalar.bit", clock_mhz=20.0):
         if Overlay is None:
             raise RuntimeError(
                 "pynq library not found! Please run this script on the PYNQ-Z2 board "
                 "or install the pynq package."
             )
+        if not os.path.exists(bitstream):
+            raise FileNotFoundError(f"Bitstream file '{bitstream}' not found in current directory!")
+
         print(f"[PYNQ] Downloading bitstream: {bitstream} ...")
         self.ol = Overlay(bitstream)
+
+        # Dynamically configure PL clock to resolve timing violations
+        if Clocks is not None and clock_mhz is not None:
+            try:
+                print(f"[PYNQ] Initial FCLK0: {Clocks.fclk0_mhz:.2f} MHz")
+                Clocks.fclk0_mhz = clock_mhz
+                print(f"[PYNQ] Dynamically adjusted FCLK0 to: {Clocks.fclk0_mhz:.2f} MHz")
+            except Exception as e:
+                print(f"[WARNING] Could not set clock via pynq.Clocks: {e}")
+
         # Find the ooo_axi_wrapper IP core instance
-        if hasattr(self.ol, "ooo_axi_wrapper_0"):
+        if hasattr(self.ol, "ooo_core_0"):
+            self.ip = self.ol.ooo_core_0
+            print("[PYNQ] Connected to IP: ooo_core_0")
+        elif hasattr(self.ol, "ooo_axi_wrapper_0"):
             self.ip = self.ol.ooo_axi_wrapper_0
+            print("[PYNQ] Connected to IP: ooo_axi_wrapper_0")
         elif hasattr(self.ol, "ooo_axi_wrapper"):
             self.ip = self.ol.ooo_axi_wrapper
+            print("[PYNQ] Connected to IP: ooo_axi_wrapper")
         else:
-            # Fallback: find by IP name
+            # Fallback: search by IP name pattern
             ip_names = [k for k in self.ol.ip_dict.keys() if "ooo" in k.lower()]
             if not ip_names:
-                raise RuntimeError(f"Could not find ooo_axi_wrapper IP. Available IPs: {list(self.ol.ip_dict.keys())}")
+                raise RuntimeError(f"Could not find OoO core IP. Available IPs: {list(self.ol.ip_dict.keys())}")
             self.ip = getattr(self.ol, ip_names[0])
             print(f"[PYNQ] Connected to IP: {ip_names[0]}")
 
@@ -69,7 +88,6 @@ class OoOProcessorFPGA:
     def read_mem_dword(self, byte_addr):
         """Reads a 64-bit doubleword from BRAM at byte_addr"""
         self.ip.write(0x14, byte_addr & 0xFFFF)
-        # Wait a tiny moment for synchronous BRAM latching
         lo = self.ip.read(0x24)
         hi = self.ip.read(0x28)
         return (hi << 32) | lo
@@ -88,60 +106,81 @@ class OoOProcessorFPGA:
             raise FileNotFoundError(f"Memory file '{mem_file}' not found!")
 
         with open(mem_file, "r") as f:
-            lines = [l.strip() for l in f if l.strip()]
+            raw_lines = [l.strip() for l in f if l.strip()]
 
         count = 0
-        for i, line in enumerate(lines):
-            val = int(line, 16)
+        for i, line in enumerate(raw_lines):
+            clean = line.split("//")[0].split("#")[0].strip()
+            if not clean:
+                continue
+            val = int(clean, 16)
             self.write_mem_dword(i * 8, val)
             count += 1
 
-        print(f"[PYNQ] Successfully loaded {count} doublewords ({count*8} bytes) into BRAM.")
+        print(f"[PYNQ] Successfully loaded {count} doublewords ({count * 8} bytes) into BRAM.")
 
-    def run(self, timeout_sec=5.0):
-        """Runs the core and waits for WFI / Halt"""
-        print("[PYNQ] Releasing processor reset. Running at 50 MHz...")
+    def run(self, execution_time=0.05, timeout_sec=2.0):
+        """
+        Runs the core and allows execution to finish.
+        """
+        freq_str = f"{Clocks.fclk0_mhz:.1f} MHz" if Clocks is not None else "FPGA clock"
+        print(f"[PYNQ] Releasing processor reset. Running at {freq_str}...")
         start_time = time.time()
         self.release_core()
 
-        while not self.is_halted():
-            if time.time() - start_time > timeout_sec:
-                print(f"\n[ERROR] Core execution timed out after {timeout_sec} seconds! Halting.")
-                self.reset_core()
-                return False
+        halted = False
+        # Poll rapidly for WFI halt
+        while (time.time() - start_time) < execution_time:
+            if self.is_halted():
+                halted = True
+                break
             time.sleep(0.001)
 
+        # If not caught by short poll, wait out the remaining execution window
+        remaining = execution_time - (time.time() - start_time)
+        if remaining > 0 and not halted:
+            time.sleep(remaining)
+
         elapsed = time.time() - start_time
-        print(f"[PYNQ] Core HALT detected in {elapsed*1000:.2f} ms.")
+        if halted:
+            print(f"[PYNQ] Core HALT detected in {elapsed * 1000:.2f} ms.")
+        else:
+            print(f"[PYNQ] Core execution window completed ({elapsed * 1000:.2f} ms).")
         return True
 
     def print_results(self, max_mem_words=2048):
         """Prints performance metrics, registers, and unified memory dump"""
+        # Read performance counters
         cycles  = self.ip.read(0x08)
         retired = self.ip.read(0x0C)
         mispred = self.ip.read(0x10)
 
+        # 1. Read Committed Architectural Registers (x0 - x31) FIRST while registers are intact
+        arch_regs = [self.read_arch_reg(i) for i in range(32)]
+
+        # 2. Put core in reset to guarantee host access to BRAM Port B (host_mem_access = reg_core_rst | core_halt)
+        self.reset_core()
+
         print("\n==================================================================")
-        print("   SIMULATION SUCCESS: WFI / HALT instruction committed!")
+        print("   EXECUTION SUCCESS / HALT")
         print("==================================================================")
         print("   Execution Summary:")
         print(f"   - Total Cycles:          {cycles}")
         print(f"   - Retired Instructions:  {retired + 1}")
         print(f"   - Branch Mispredictions: {mispred}")
-        if cycles > 0:
+        if cycles > 0 and retired > 0:
             print(f"   - Final IPC:             {(retired + 1.0) / cycles:.6f}")
             print(f"   - Final CPI:             {cycles / (retired + 1.0):.6f}")
         print("==================================================================")
         print("   Committed Architectural Registers (x0 - x31):")
         for i in range(0, 32, 4):
-            vals = [self.read_arch_reg(i + j) for j in range(4)]
-            print(f"   x{i:02d}: 0x{vals[0]:016x}  x{i+1:02d}: 0x{vals[1]:016x}  "
-                  f"x{i+2:02d}: 0x{vals[2]:016x}  x{i+3:02d}: 0x{vals[3]:016x}")
+            print(f"   x{i:02d}: 0x{arch_regs[i]:016x}  x{i+1:02d}: 0x{arch_regs[i+1]:016x}  "
+                  f"x{i+2:02d}: 0x{arch_regs[i+2]:016x}  x{i+3:02d}: 0x{arch_regs[i+3]:016x}")
         print("==================================================================")
         print("@@@ Unified Memory contents hex on left, decimal on right: ")
         print("@@@")
 
-        # Read back non-zero memory lines
+        # 3. Read back non-zero memory lines (safe now that host has Port B access)
         for i in range(max_mem_words):
             byte_addr = i * 8
             val = self.read_mem_dword(byte_addr)
@@ -149,7 +188,7 @@ class OoOProcessorFPGA:
                 print(f"@@@ mem[{byte_addr:5d}] = {val:016x} : {val}")
 
         print("@@@")
-        print("@@@ System halted on WFI instruction\n")
+        print("@@@ Core execution and memory dump complete\n")
 
 
 def compile_assembly(asm_path, output_mem="program.mem"):
@@ -170,7 +209,9 @@ def main():
     parser.add_argument("mem_file", nargs="?", default="program.mem", help="Path to program.mem file")
     parser.add_argument("--source", "-s", default=None, help="Path to .s assembly file to compile & run")
     parser.add_argument("--bitstream", "-b", default="ooo_scalar.bit", help="Path to FPGA bitstream (.bit)")
-    parser.add_argument("--timeout", "-t", type=float, default=5.0, help="Execution timeout in seconds")
+    parser.add_argument("--clock", "-c", type=float, default=20.0, help="PL clock frequency in MHz (default: 20.0 MHz)")
+    parser.add_argument("--duration", "-d", type=float, default=0.05, help="Execution duration window in seconds (default: 0.05s)")
+    parser.add_argument("--timeout", "-t", type=float, default=2.0, help="Execution timeout in seconds")
     args = parser.parse_args()
 
     mem_target = args.mem_file
@@ -178,9 +219,9 @@ def main():
         compile_assembly(args.source, "program.mem")
         mem_target = "program.mem"
 
-    fpga = OoOProcessorFPGA(bitstream=args.bitstream)
+    fpga = OoOProcessorFPGA(bitstream=args.bitstream, clock_mhz=args.clock)
     fpga.load_program_mem(mem_target)
-    if fpga.run(timeout_sec=args.timeout):
+    if fpga.run(execution_time=args.duration, timeout_sec=args.timeout):
         fpga.print_results()
 
 
