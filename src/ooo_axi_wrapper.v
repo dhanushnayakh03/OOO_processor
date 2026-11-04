@@ -61,12 +61,21 @@ module ooo_axi_wrapper #(
 
     // Processor Core Status
     wire        core_halt;
+    reg         reg_halt_latched;
     wire        core_retire_valid;
     wire        core_retire_is_mispred;
     wire [`XLEN-1:0]     core_retire_pc;
     wire [`AR_WIDTH-1:0] core_retire_arch_dest;
     wire [`PR_WIDTH-1:0] core_retire_tag_new;
     wire [`PR_WIDTH-1:0] core_retire_tag_old;
+
+    always @(posedge s_axi_aclk) begin
+        if (!s_axi_aresetn || reg_core_rst || reg_perf_clr) begin
+            reg_halt_latched <= 1'b0;
+        end else if (core_halt) begin
+            reg_halt_latched <= 1'b1;
+        end
+    end
 
     // Memory Wires
     wire             imem_en;
@@ -83,7 +92,7 @@ module ooo_axi_wrapper #(
     // Memory Port B Mux (Host vs Core Access)
     // ========================================================================
     // Host has access to Port B when core is in reset or when halted
-    wire host_mem_access = reg_core_rst | core_halt;
+    wire host_mem_access = reg_core_rst | reg_halt_latched;
 
     wire             dmem_en      = host_mem_access ? 1'b1 : core_dmem_en;
     wire             dmem_wen     = host_mem_access ? reg_mem_we_pulse : core_dmem_wen;
@@ -147,7 +156,7 @@ module ooo_axi_wrapper #(
             perf_cycle_cnt   <= 32'd0;
             perf_retire_cnt  <= 32'd0;
             perf_mispred_cnt <= 32'd0;
-        end else if (!reg_core_rst && !core_halt) begin
+        end else if (!reg_core_rst && !reg_halt_latched) begin
             perf_cycle_cnt <= perf_cycle_cnt + 32'd1;
 
             if (core_retire_valid) begin
@@ -240,7 +249,7 @@ module ooo_axi_wrapper #(
 
                 case (axi_araddr[7:0])
                     8'h00: s_axi_rdata <= {30'd0, reg_perf_clr, reg_core_rst};
-                    8'h04: s_axi_rdata <= {29'd0, core_retire_is_mispred, core_retire_valid, core_halt};
+                    8'h04: s_axi_rdata <= {29'd0, core_retire_is_mispred, core_retire_valid, reg_halt_latched};
                     8'h08: s_axi_rdata <= perf_cycle_cnt;
                     8'h0C: s_axi_rdata <= perf_retire_cnt;
                     8'h10: s_axi_rdata <= perf_mispred_cnt;
