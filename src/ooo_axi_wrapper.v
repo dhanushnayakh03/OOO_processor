@@ -104,7 +104,7 @@ module ooo_axi_wrapper #(
     // Core & Memory Instantiation
     // ========================================================================
     memory #(
-        .MEM_SIZE_BYTES(65536)
+        .MEM_SIZE_BYTES(32768)
     ) u_mem (
         .clk          (s_axi_aclk),
         .rst          (!s_axi_aresetn),
@@ -152,10 +152,10 @@ module ooo_axi_wrapper #(
     // Hardware Performance Counters & Retirement Trace Buffer
     // ========================================================================
     reg [3:0]        reg_trace_sel;
-    reg [`XLEN-1:0]  trace_pc      [0:15];
-    reg [4:0]        trace_dest    [0:15];
-    reg              trace_mispred [0:15];
-    reg [15:0]       trace_cycle   [0:15];
+    (* ram_style = "registers" *) reg [`XLEN-1:0]  trace_pc      [0:15];
+    (* ram_style = "registers" *) reg [4:0]        trace_dest    [0:15];
+    (* ram_style = "registers" *) reg              trace_mispred [0:15];
+    (* ram_style = "registers" *) reg [15:0]       trace_cycle   [0:15];
     reg [3:0]        trace_count;
 
     always @(posedge s_axi_aclk) begin

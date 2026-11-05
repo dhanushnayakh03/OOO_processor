@@ -82,11 +82,17 @@ catch {
 # Instantiate OoO Processor AXI Wrapper as Module Reference
 create_bd_cell -type module -reference ooo_axi_wrapper ooo_axi_wrapper_0
 
+# Find the slave AXI interface on ooo_axi_wrapper_0
+set axi_intf [get_bd_intf_pins ooo_axi_wrapper_0/s_axi]
+if {[llength $axi_intf] == 0} {
+    set axi_intf [get_bd_intf_pins -of_objects [get_bd_cells ooo_axi_wrapper_0]]
+}
+
 # Run Connection Automation for AXI Interconnect, Clocks, Resets
 apply_bd_automation -rule xilinx.com:bd_rule:axi4 -config { \
     Master "/ps7_0/M_AXI_GP0" \
     Clk "Auto" \
-} [get_bd_pins ooo_axi_wrapper_0/s_axi]
+} $axi_intf
 
 # Validate and Save Block Design
 validate_bd_design
@@ -97,34 +103,17 @@ puts "=================================================================="
 puts " Generating Block Design Output Products & HDL Wrapper"
 puts "=================================================================="
 set bd_file [get_files "design_1.bd"]
+set_property synth_checkpoint_mode Hierarchical $bd_file
 generate_target all $bd_file
-make_wrapper -files $bd_file -top
-add_files -norecurse [get_files -of_objects [get_filesets sources_1] *design_1_wrapper*]
+set wrapper_file [make_wrapper -files $bd_file -top]
+add_files -norecurse $wrapper_file
 set_property top design_1_wrapper [current_fileset]
 update_compile_order -fileset sources_1
 
-# 5. Run Synthesis and Implementation to Generate Bitstream
 puts "=================================================================="
-puts " Running Fresh Synthesis & Implementation (Zero Cache)..."
-puts "=================================================================="
-launch_runs impl_1 -to_step write_bitstream -jobs 8
-wait_on_run impl_1
-
-# 6. Copy Bitstream and Hardware Handoff (.hwh) for PYNQ
-set bit_file [get_property DIRECTORY [get_runs impl_1]]/design_1_wrapper.bit
-
-file copy -force $bit_file [file join $script_dir "ooo_scalar.bit"]
-catch {
-    set hwh_files [glob -nocomplain [file join $project_dir "$project_name.gen" "sources_1" "bd" "design_1" "hw_handoff" "*.hwh"]]
-    if {[llength $hwh_files] > 0} {
-        file copy -force [lindex $hwh_files 0] [file join $script_dir "ooo_scalar.hwh"]
-    }
-}
-
-puts "=================================================================="
-puts " BUILD COMPLETE!"
-puts " Output files generated:"
-puts "   -> [file join $script_dir ooo_scalar.bit]"
-puts "   -> [file join $script_dir ooo_scalar.hwh]"
-puts " Copy ooo_scalar.bit to your PYNQ board and run test_branch_simple.s!"
+puts " PROJECT SETUP COMPLETED SUCCESSFULLY!"
+puts " 1. The clean project is ready in your Vivado GUI."
+puts " 2. All 20 RTL source files and block design are connected."
+puts " 3. Click 'Generate Bitstream' in the Flow Navigator (bottom left)."
+puts "    (When prompted, choose 1 or 2 jobs to keep RAM usage minimal!)"
 puts "=================================================================="
