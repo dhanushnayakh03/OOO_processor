@@ -97,7 +97,7 @@ module rob (
     assign retire_halt            = rob_halt[head];
 
     integer i;
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             for (i = 0; i < `ROB_ENTRIES; i = i + 1) begin
                 rob_valid[i]          <= 1'b0;

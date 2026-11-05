@@ -82,7 +82,7 @@ module fu_alu (
     end
 
     // Sequential Update to Store Queue
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             sq_update_en      <= 1'b0;
             sq_update_idx     <= `SQ_WIDTH'd0;
@@ -148,7 +148,7 @@ module fu_alu (
     // ------------------------------------------------------------------------
     // FU/C Output Pipeline Register
     // ------------------------------------------------------------------------
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             fu_c_valid   <= 1'b0;
             fu_c_rob_idx <= `ROB_WIDTH'd0;

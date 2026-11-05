@@ -50,19 +50,22 @@ module free_list (
     end
 
     // ------------------------------------------------------------------------
-    // Combinational RRAT check for Recovery (parallel bitmask generation)
+    // Combinational RRAT check for Recovery (Static synthesizable bitmask)
     // ------------------------------------------------------------------------
-    reg [`NUM_PHYS_REGS-1:0] recovered_free_mask;
-    integer a_idx;
+    wire [`NUM_PHYS_REGS-1:0] recovered_free_mask;
+    assign recovered_free_mask[0] = 1'b0; // p0 is hardwired zero, never free
 
-    always @(*) begin
-        // Start with all physical registers free except p0 (hardwired zero)
-        recovered_free_mask = 64'hFFFFFFFFFFFFFFFE;
-        // Mark physical registers currently mapped in RRAT as in-use (not free)
-        for (a_idx = 1; a_idx < `NUM_ARCH_REGS; a_idx = a_idx + 1) begin
-            recovered_free_mask[rrat_mappings[a_idx * `PR_WIDTH +: `PR_WIDTH]] = 1'b0;
+    genvar p_idx, r_idx;
+    generate
+        for (p_idx = 1; p_idx < `NUM_PHYS_REGS; p_idx = p_idx + 1) begin : gen_p_free
+            wire [31:1] p_in_rrat;
+            for (r_idx = 1; r_idx < `NUM_ARCH_REGS; r_idx = r_idx + 1) begin : gen_r_match
+                assign p_in_rrat[r_idx] = (rrat_mappings[r_idx * `PR_WIDTH +: `PR_WIDTH] == p_idx[5:0]);
+            end
+            // Physical register p is free if it is not currently held in RRAT
+            assign recovered_free_mask[p_idx] = !(|p_in_rrat);
         end
-    end
+    endgenerate
 
     // ------------------------------------------------------------------------
     // Sequential State Update

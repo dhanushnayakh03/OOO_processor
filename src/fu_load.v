@@ -120,7 +120,7 @@ module fu_load (
 
     assign fu_load_ready = !bram_pending && (!fu_c_valid || load_grant);
 
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             fu_c_valid   <= 1'b0;
             fu_c_rob_idx <= `ROB_WIDTH'd0;

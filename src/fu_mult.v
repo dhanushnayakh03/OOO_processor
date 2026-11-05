@@ -65,7 +65,7 @@ module fu_mult (
     reg [`XLEN-1:0]       s3_op_a;
     reg [`XLEN-1:0]       s3_op_b;
 
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             s1_valid   <= 1'b0;
             s1_op      <= 3'd0;
@@ -145,7 +145,7 @@ module fu_mult (
     // ------------------------------------------------------------------------
     // Pipeline Stage 4 / FU/C Output Register (Cycle 4)
     // ------------------------------------------------------------------------
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             fu_c_valid   <= 1'b0;
             fu_c_rob_idx <= `ROB_WIDTH'd0;

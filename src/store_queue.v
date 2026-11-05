@@ -71,6 +71,9 @@ module store_queue (
     integer k;
     reg [`SQ_WIDTH-1:0] curr_idx;
     reg found_match;
+    // Number of stores strictly OLDER than the load (between head and load_sq_tail).
+    // The scan must never wrap into YOUNGER stores (would cause false hazards / deadlock).
+    wire [`SQ_WIDTH-1:0] older_cnt = load_sq_tail - head;
     always @(*) begin
         sq_forward_valid = 1'b0;
         sq_forward_data  = 64'd0;
@@ -83,7 +86,7 @@ module store_queue (
                 curr_idx = load_sq_tail - 1'b1 - k[`SQ_WIDTH-1:0];
                 
                 // Check if curr_idx is between head and load_sq_tail in circular queue
-                if (!found_match && sq_valid[curr_idx]) begin
+                if (!found_match && (k < older_cnt) && sq_valid[curr_idx]) begin
                     // Verify if this entry is indeed older than load_sq_tail
                     // In circular buffer: valid entry older than load_sq_tail
                     if (!sq_addr_ready[curr_idx]) begin
@@ -149,7 +152,7 @@ module store_queue (
 
     // Sequential Queue State Management
     integer i;
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             for (i = 0; i < `SQ_ENTRIES; i = i + 1) begin
                 sq_valid[i]      <= 1'b0;

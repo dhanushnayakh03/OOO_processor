@@ -276,7 +276,7 @@ module ooo_axi_wrapper #(
                     8'h30: s_axi_rdata <= {27'd0, reg_arch_sel};
                     8'h34: s_axi_rdata <= arch_reg_val[31:0];    // REG_ARCH_VAL_LO
                     8'h38: s_axi_rdata <= arch_reg_val[63:32];   // REG_ARCH_VAL_HI
-                    8'h3C: s_axi_rdata <= 32'hBEEF0002;          // BITSTREAM VERSION SIGNATURE
+                    8'h3C: s_axi_rdata <= 32'hBEEF0003;          // BITSTREAM VERSION SIGNATURE
                     8'h40: s_axi_rdata <= {28'd0, reg_trace_sel};
                     8'h44: s_axi_rdata <= trace_pc[reg_trace_sel][31:0];
                     8'h48: s_axi_rdata <= trace_pc[reg_trace_sel][63:32];

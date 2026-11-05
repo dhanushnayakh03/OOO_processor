@@ -95,7 +95,7 @@ module fu_branch (
     // ------------------------------------------------------------------------
     // Sequential Predictor Training and FU/C Output Register
     // ------------------------------------------------------------------------
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             bp_update_en            <= 1'b0;
             bp_update_pc            <= 64'd0;

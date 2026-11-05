@@ -152,7 +152,7 @@ module reservation_station (
 
     // Sequential State Management
     integer i;
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin // sync: recover_en must NOT be an async clear (FPGA)
         if (rst || recover_en) begin
             for (i = 0; i < `RS_ENTRIES; i = i + 1) begin
                 rs_busy[i]        <= 1'b0;

@@ -10,8 +10,8 @@ set script_dir [file dirname [file normalize [info script]]]
 if {$script_dir eq ""} { set script_dir "." }
 set src_dir [file join $script_dir "src"]
 
-set project_name "pynq_ooo_scalar_fin"
-set project_dir  [file join $script_dir "vivado_project"]
+set project_name "pynq_ooo_scalar_v2"
+set project_dir  [file join $script_dir "vivado_project_v2"]
 set part_number  "xc7z020clg400-1"
 
 puts "=================================================================="
@@ -21,7 +21,7 @@ puts "=================================================================="
 
 # 1. Close any open project and create a fresh one
 catch { close_project }
-file delete -force $project_dir
+catch { file delete -force $project_dir }
 create_project -force $project_name $project_dir -part $part_number
 
 # 2. Add All Clean RTL Source Files
