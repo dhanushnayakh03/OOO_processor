@@ -38,7 +38,7 @@ module fetch_stage (
     // Next sequential or predicted PC for IF1
     wire [`XLEN-1:0] next_fetch_pc = pred_taken ? pred_target : pc_plus_4;
 
-    always @(posedge clk or posedge rst) begin
+    always @(posedge clk) begin
         if (rst) begin
             pc                <= 64'd0;
             if_id_valid       <= 1'b0;

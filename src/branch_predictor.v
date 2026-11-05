@@ -2,6 +2,8 @@
 // File: branch_predictor.v
 // Description: Parameterized 2-bit Saturating Counter Branch Target Buffer (BTB).
 //              Can be turned ON/OFF via parameter ENABLE_BRANCH_PREDICTOR.
+//              Optimized for Xilinx FPGA synthesis with synchronous reset
+//              and power-up initial values (INIT).
 // Standard Verilog-2001
 // ============================================================================
 
@@ -38,10 +40,21 @@ module branch_predictor #(
             end
         end else begin : gen_bp_enabled
             // Dynamic 2-bit Saturating Counter Branch Target Buffer
-            reg                 btb_valid  [0:ENTRIES-1];
+            reg [ENTRIES-1:0]   btb_valid;
             reg [TAG_WIDTH-1:0] btb_tag    [0:ENTRIES-1];
             reg [1:0]           btb_state  [0:ENTRIES-1];
             reg [`XLEN-1:0]     btb_target [0:ENTRIES-1];
+
+            // Power-up initialization for FPGA bitstream (INIT attributes in Vivado)
+            integer k;
+            initial begin
+                btb_valid = {ENTRIES{1'b0}};
+                for (k = 0; k < ENTRIES; k = k + 1) begin
+                    btb_tag[k]    = {TAG_WIDTH{1'b0}};
+                    btb_state[k]  = 2'b01; // WEAK_NOT_TAKEN
+                    btb_target[k] = 64'd0;
+                end
+            end
 
             // Address hashing: discard 2 low bits (word alignment)
             wire [INDEX_WIDTH-1:0] fetch_idx = fetch_pc[INDEX_WIDTH+1:2];
@@ -61,16 +74,12 @@ module branch_predictor #(
                 end
             end
 
-            // Training & State Update (Sequential)
-            integer i;
-            always @(posedge clk or posedge rst) begin
+            // Training & State Update (Synchronous Clock-Edge Reset for Xilinx FPGA)
+            always @(posedge clk) begin
                 if (rst) begin
-                    for (i = 0; i < ENTRIES; i = i + 1) begin
-                        btb_valid[i]  <= 1'b0;
-                        btb_tag[i]    <= {TAG_WIDTH{1'b0}};
-                        btb_state[i]  <= 2'b01; // WEAK_NOT_TAKEN
-                        btb_target[i] <= 64'd0;
-                    end
+                    // Single-cycle synchronous reset: clearing the 32-bit btb_valid register
+                    // instantly invalidates all entries without synthesis timing bloat!
+                    btb_valid <= {ENTRIES{1'b0}};
                 end else if (update_en) begin
                     btb_valid[update_idx]  <= 1'b1;
                     btb_tag[update_idx]    <= update_tag;
@@ -78,12 +87,17 @@ module branch_predictor #(
 
                     // 2-bit Saturating Counter Transitions:
                     // 00: Strong NT, 01: Weak NT, 10: Weak T, 11: Strong T
-                    case (btb_state[update_idx])
-                        2'b00: btb_state[update_idx] <= update_actual_taken ? 2'b01 : 2'b00;
-                        2'b01: btb_state[update_idx] <= update_actual_taken ? 2'b10 : 2'b00;
-                        2'b10: btb_state[update_idx] <= update_actual_taken ? 2'b11 : 2'b01;
-                        2'b11: btb_state[update_idx] <= update_actual_taken ? 2'b11 : 2'b10;
-                    endcase
+                    if (!btb_valid[update_idx]) begin
+                        // First allocation: initialize based on outcome
+                        btb_state[update_idx] <= update_actual_taken ? 2'b10 : 2'b01;
+                    end else begin
+                        case (btb_state[update_idx])
+                            2'b00: btb_state[update_idx] <= update_actual_taken ? 2'b01 : 2'b00;
+                            2'b01: btb_state[update_idx] <= update_actual_taken ? 2'b10 : 2'b00;
+                            2'b10: btb_state[update_idx] <= update_actual_taken ? 2'b11 : 2'b01;
+                            2'b11: btb_state[update_idx] <= update_actual_taken ? 2'b11 : 2'b10;
+                        endcase
+                    end
                 end
             end
         end

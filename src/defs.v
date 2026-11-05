@@ -36,8 +36,8 @@
 `define SQ_WIDTH         4
 
 // Branch Predictor Constants
-`define BP_ENTRIES       64   // 64-entry 2-bit branch predictor
-`define BP_INDEX_WIDTH   6
+`define BP_ENTRIES       32   // 32-entry 2-bit branch predictor (matches sup_scal)
+`define BP_INDEX_WIDTH   5
 
 // ----------------------------------------------------------------------------
 // Major RISC-V Opcodes (7 bits)
