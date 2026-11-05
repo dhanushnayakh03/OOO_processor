@@ -149,13 +149,21 @@ module ooo_axi_wrapper #(
     wire [`XLEN-1:0]     arch_reg_val = (reg_arch_sel == 5'd0) ? 64'd0 : u_core.u_prf.prf[arch_pr_tag];
 
     // ========================================================================
-    // Hardware Performance Counters
+    // Hardware Performance Counters & Retirement Trace Buffer
     // ========================================================================
+    reg [3:0]        reg_trace_sel;
+    reg [`XLEN-1:0]  trace_pc      [0:15];
+    reg [4:0]        trace_dest    [0:15];
+    reg              trace_mispred [0:15];
+    reg [15:0]       trace_cycle   [0:15];
+    reg [3:0]        trace_count;
+
     always @(posedge s_axi_aclk) begin
         if (!s_axi_aresetn || reg_perf_clr) begin
             perf_cycle_cnt   <= 32'd0;
             perf_retire_cnt  <= 32'd0;
             perf_mispred_cnt <= 32'd0;
+            trace_count      <= 4'd0;
         end else if (!reg_core_rst && !reg_halt_latched) begin
             perf_cycle_cnt <= perf_cycle_cnt + 32'd1;
 
@@ -164,6 +172,12 @@ module ooo_axi_wrapper #(
                 if (core_retire_is_mispred) begin
                     perf_mispred_cnt <= perf_mispred_cnt + 32'd1;
                 end
+
+                trace_pc[trace_count]      <= core_retire_pc;
+                trace_dest[trace_count]    <= core_retire_arch_dest;
+                trace_mispred[trace_count] <= core_retire_is_mispred;
+                trace_cycle[trace_count]   <= perf_cycle_cnt[15:0];
+                trace_count                <= trace_count + 4'd1;
             end
         end
     end
@@ -214,6 +228,7 @@ module ooo_axi_wrapper #(
                     8'h1C: reg_mem_wdata_hi <= s_axi_wdata;
                     8'h20: reg_mem_we_pulse <= s_axi_wdata[0]; // Pulse BRAM write
                     8'h30: reg_arch_sel     <= s_axi_wdata[4:0];
+                    8'h40: reg_trace_sel    <= s_axi_wdata[3:0];
                     default: ;
                 endcase
             end else if (s_axi_bvalid && s_axi_bready) begin
@@ -261,6 +276,12 @@ module ooo_axi_wrapper #(
                     8'h30: s_axi_rdata <= {27'd0, reg_arch_sel};
                     8'h34: s_axi_rdata <= arch_reg_val[31:0];    // REG_ARCH_VAL_LO
                     8'h38: s_axi_rdata <= arch_reg_val[63:32];   // REG_ARCH_VAL_HI
+                    8'h3C: s_axi_rdata <= 32'hBEEF0002;          // BITSTREAM VERSION SIGNATURE
+                    8'h40: s_axi_rdata <= {28'd0, reg_trace_sel};
+                    8'h44: s_axi_rdata <= trace_pc[reg_trace_sel][31:0];
+                    8'h48: s_axi_rdata <= trace_pc[reg_trace_sel][63:32];
+                    8'h4C: s_axi_rdata <= {10'd0, trace_mispred[reg_trace_sel], trace_dest[reg_trace_sel], trace_cycle[reg_trace_sel]};
+                    8'h50: s_axi_rdata <= {28'd0, trace_count};
                     default: s_axi_rdata <= 32'd0;
                 endcase
             end else if (s_axi_rvalid && s_axi_rready) begin
